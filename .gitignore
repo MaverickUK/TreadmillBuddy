@@ -1,0 +1,15 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Editors
+.vscode/
+.idea/
+
+# CircuitPython device artifacts
+.Trash-*
+*.UF2
+boot_out.txt

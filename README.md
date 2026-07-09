@@ -1,0 +1,127 @@
+# Treadmill Buddy
+
+Automated, varied-pace treadmill sessions on a Raspberry Pi Pico + Pimoroni
+**Pico Display Pack**, driving a treadmill's remote through a **CD4066**
+quad bilateral switch. Written for **CircuitPython**. Works with either the
+**2.0"/2.8" pack** (320x240) or the original **1.14" pack** (240x135) — pick
+which one you have via a single setting (see [Choosing your display
+pack](#choosing-your-display-pack)).
+
+A session lasts 45 minutes; every 5 minutes the target speed moves up or down
+by 0.5 km/h, staying between 2.0 and 3.5 km/h. The plan is generated and shown
+as a bar chart *before* it runs, then tracked live.
+
+## Files
+
+| File            | Purpose                                                        |
+| --------------- | -------------------------------------------------------------- |
+| `settings.py`   | **All** tunable values – timings, speeds, pins, display model. Start here. |
+| `plan.py`       | Generates the per-segment speed plan.                          |
+| `treadmill.py`  | Open-loop CD4066 button-presser + assumed-speed tracking.      |
+| `ui.py`         | Renders the five screens with `displayio`.                     |
+| `code.py`       | State machine + button handling. Auto-runs on boot.            |
+
+## Install
+
+1. Flash the latest **CircuitPython** UF2 for the Raspberry Pi Pico from
+   [circuitpython.org/board/raspberry_pi_pico](https://circuitpython.org/board/raspberry_pi_pico/).
+2. From the matching [CircuitPython library bundle](https://circuitpython.org/libraries),
+   copy these into the Pico's `/lib` folder:
+   - `adafruit_st7789.mpy`
+   - `adafruit_display_text/` (the whole folder)
+
+   (`displayio`, `fourwire`, `vectorio`, `terminalio`, `pwmio`, `digitalio` and
+   `busio` are built into CircuitPython — nothing to copy.)
+3. Copy all the `.py` files in this repo to the root of the `CIRCUITPY` drive.
+   `code.py` runs automatically on power-up.
+
+## Choosing your display pack
+
+Set `DISPLAY_MODEL` in `settings.py` to match the hardware you have:
+
+```python
+DISPLAY_MODEL = "2.8"     # 320x240 Pico Display Pack 2.0" / 2.8"
+DISPLAY_MODEL = "1.14"    # 240x135 Pico Display Pack (original)
+```
+
+That one line derives the panel geometry (`DISPLAY_WIDTH/HEIGHT/ROWSTART/
+COLSTART/ROTATION`) and the on-board RGB LED pins automatically — nothing
+else in `settings.py` needs to change. `ui.py` picks a compact or roomy
+layout at runtime based on the resulting screen height, so both sizes render
+correctly with no code edits.
+
+## The five screens
+
+1. **Splash** – app name + author, 2 s.
+2. **Planning** – bar chart of the planned trip; press **A** to start.
+3. **Running** – live position on the chart, current speed, elapsed & remaining.
+4. **Paused** – as running, with a "PAUSED" overlay (amber LED).
+5. **Completed** – summary for 30 s, then back to a fresh plan.
+
+## Buttons
+
+| Button | Position   | Action                                                        |
+| ------ | ---------- | ------------------------------------------------------------- |
+| **A**  | top-left   | Planning→start, Running→pause, Paused→resume                  |
+| **X**  | top-right  | Planning→regenerate plan, Running/Paused→stop to a new plan   |
+
+(B and Y are unused. Any button also skips the Completed screen early.)
+
+## Wiring
+
+### CD4066 (treadmill remote) — you must match these in `settings.py`
+Driving a pin **HIGH** closes the matching switch = one button press.
+
+| GPIO | CD4066 switch → remote button |
+| ---- | ----------------------------- |
+| 0    | Speed **+**                   |
+| 1    | Speed **−**                   |
+| 2    | **Start**                     |
+| 3    | **Stop**                      |
+
+(GP0–3 are free on both the 1.14" and 2.8" packs. Earlier these were on GP6–9,
+but GP6/7/8 are the 1.14" pack's RGB LED, so idling them lit the LED white.)
+
+### Pico Display Pack (fixed by the hardware)
+LCD (ST7789, SPI0) and button pins are identical across both packs:
+SCK=GP18, MOSI=GP19, CS=GP17, DC=GP16, backlight=GP20; buttons A/B/X/Y =
+GPIO 12/13/14/15 (active-low, internal pull-up). Only the panel geometry and
+RGB LED pins differ, and both are set for you by `DISPLAY_MODEL` in
+`settings.py`:
+
+| Pack        | `DISPLAY_MODEL` | Resolution | RGB LED pins |
+| ----------- | ---------------- | ---------- | ------------- |
+| 2.0" / 2.8" | `"2.8"`          | 320x240    | GPIO 26/27/28 |
+| 1.14"       | `"1.14"`         | 240x135    | GPIO 6/7/8    |
+
+The RGB LED is common-anode and off by default (`USE_RGB_LED = False`). On
+the 1.14" pack its pins (6/7/8) would otherwise clash with the CD4066 wiring
+below if it were on GP6–9 — that's why the CD4066 uses GP0–3 instead, which
+are free on both packs.
+
+## Assumptions to verify for YOUR treadmill
+
+The controller has **no feedback** from the treadmill, so it counts button
+presses against an assumed speed. Check these values in `settings.py`:
+
+- `TREADMILL_SPEED_PER_PRESS_KPH` (default **0.1**) — how much one speed-+/−
+  press changes the belt. The program issues `0.5 / this` = 5 presses per step.
+- `TREADMILL_START_SPEED_KPH` (default **1.0**) — belt speed right after the
+  START button; the program ramps up from here.
+- `PAUSE_STOPS_BELT` (default **True**) — pause presses STOP and resume presses
+  START then ramps back up. Set False if your treadmill can't safely restart.
+- `BUTTON_PULSE_MS` / `BUTTON_GAP_MS` — lengthen if the treadmill misses presses.
+
+## Tuning the session
+
+Everything is in `settings.py`. For example, a 30-minute session that varies
+every 3 minutes between 2.5 and 4.0 km/h:
+
+```python
+SESSION_DURATION_MIN = 30
+SPEED_CHANGE_INTERVAL_MIN = 3
+MIN_SPEED_KPH = 2.5
+MAX_SPEED_KPH = 4.0
+```
+
+The number of chart bars and plan length adjust automatically.
