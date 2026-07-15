@@ -35,8 +35,13 @@ RANDOM_PLAN = True
 # move PIN_RF_TX to a free pin.
 PIN_RF_TX = 27                    # STX882 DATA pin
 
-RF_REPEATS = 4                   # how many times to replay a code per "press"
-RF_REPEAT_GAP_MS = 10            # pause between repeats within one press
+# How many back-to-back copies of a code to send per "press", all in one
+# continuous burst. The receiver fires its action once per decoded frame, not
+# once per burst, so this behaves like "how long you hold the button" - too
+# few and a press gets missed (decoder doesn't lock in time), too many and a
+# single tap fires several times over. Tune it with debug_rf.py: hold at the
+# lowest value that never misses a press.
+RF_REPEATS = 6
 BUTTON_GAP_MS = 150              # pause between consecutive presses
 
 # How much one press of the remote's speed +/- button changes the belt speed.
@@ -46,7 +51,13 @@ TREADMILL_SPEED_PER_PRESS_KPH = 0.1
 
 # Speed the treadmill settles at immediately after the START button is pressed.
 # The program ramps up from here to the first planned speed. Set to match yours.
-TREADMILL_START_SPEED_KPH = 1.0
+TREADMILL_START_SPEED_KPH = 0.5
+
+# Seconds between sending START and the belt actually moving - most treadmills
+# show an on-screen countdown first. start() blocks for this long before any
+# speed +/- presses are sent, so they don't get sent (and ignored) mid-countdown.
+# Set to match yours.
+TREADMILL_START_DELAY_S = 5
 
 # When paused, should the belt physically stop?
 #   True  -> press STOP on pause, and on resume press START then ramp the belt
@@ -87,8 +98,10 @@ DISPLAY_ROTATION = _display["rotation"]
 # --- Pico Display Pack buttons (active-low, internal pull-up) -----------------
 # Physical layout on the 2.8" pack:  A = top-left, B = bottom-left,
 #                                    X = top-right, Y = bottom-right.
-PIN_BUTTON_A = 12                # top-left  -> Play / Pause / Resume
-PIN_BUTTON_X = 14                # top-right -> Stop
+PIN_BUTTON_A = 12                # top-left    -> Play / Pause / Resume
+PIN_BUTTON_B = 13                # bottom-left -> unused by code.py (used by debug_rf.py)
+PIN_BUTTON_X = 14                # top-right   -> Stop
+PIN_BUTTON_Y = 15                # bottom-right -> unused by code.py (used by debug_rf.py)
 DEBOUNCE_MS = 40
 
 # --- On-board RGB LED --------------------------------------------------------

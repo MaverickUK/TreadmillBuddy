@@ -22,6 +22,7 @@ as a bar chart *before* it runs, then tracked live.
 | `rf_codes.py`   | Captured mark/space RF timings for each remote button.         |
 | `ui.py`         | Renders the five screens with `displayio`.                     |
 | `code.py`       | State machine + button handling. Auto-runs on boot.            |
+| `debug_rf.py`   | Standalone hardware test: A/B/X/Y fire Start/Stop/Up/Down.     |
 
 ## Install
 
@@ -107,6 +108,23 @@ The RGB LED is common-anode and off by default (`USE_RGB_LED = False`). On
 the 2.8" pack its green channel is GP27, the same pin used for the STX882
 DATA line — leave `USE_RGB_LED` off on that pack (or move `PIN_RF_TX`).
 
+## Testing the RF wiring
+
+Before trusting the full app, copy `debug_rf.py` over `code.py` on the
+`CIRCUITPY` drive (or run it from the REPL) to check the STX882 wiring and
+`rf_codes.py` timings in isolation:
+
+| Button | Action                  |
+| ------ | ----------------------- |
+| A      | transmit **START**      |
+| B      | transmit **STOP**       |
+| X      | transmit **SPEED_UP**   |
+| Y      | transmit **SPEED_DOWN** |
+
+Each press logs to the serial console and shows the action + a running press
+count on the LCD, so you can confirm the button was captured while watching
+a receiver/scope or the treadmill itself for the resulting signal.
+
 ## Assumptions to verify for YOUR treadmill
 
 The controller has **no feedback** from the treadmill, so it counts button
@@ -114,12 +132,20 @@ presses against an assumed speed. Check these values in `settings.py`:
 
 - `TREADMILL_SPEED_PER_PRESS_KPH` (default **0.1**) — how much one speed-+/−
   press changes the belt. The program issues `0.5 / this` = 5 presses per step.
-- `TREADMILL_START_SPEED_KPH` (default **1.0**) — belt speed right after the
+- `TREADMILL_START_SPEED_KPH` (default **0.5**) — belt speed right after the
   START button; the program ramps up from here.
+- `TREADMILL_START_DELAY_S` (default **5**) — how long the treadmill counts
+  down after START before the belt actually moves. `start()` blocks for this
+  long before sending any speed +/- presses, so they aren't sent (and
+  ignored) mid-countdown.
 - `PAUSE_STOPS_BELT` (default **True**) — pause presses STOP and resume presses
   START then ramps back up. Set False if your treadmill can't safely restart.
-- `RF_REPEATS` / `RF_REPEAT_GAP_MS` / `BUTTON_GAP_MS` — lengthen if the
-  treadmill misses presses.
+- `RF_REPEATS` (default **6**) — how many copies of a code are sent per
+  press. The receiver fires once per decoded frame, so this acts like "how
+  long the button is held": too low and a press gets missed, too high and
+  one tap fires several times. Tune with `debug_rf.py` - find the lowest
+  value that never misses a press.
+- `BUTTON_GAP_MS` — pause between consecutive presses.
 
 ## Tuning the session
 
