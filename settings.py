@@ -25,21 +25,19 @@ START_SPEED_KPH = 2.0            # speed for the first segment of the plan
 #   False -> a fixed, repeatable zig-zag pattern.
 RANDOM_PLAN = True
 
-# --- Treadmill remote interface (CD4066 quad bilateral switch) ---------------
-# Each GPIO drives one CD4066 switch. Driving a pin HIGH "closes" the switch,
-# i.e. presses the matching button on the treadmill's own remote.
-# >>> Match these to how you wired the CD4066 to the remote's button matrix. <<<
-#
-# These are on GP0-3, which are free on BOTH the 1.14" and the 2.0"/2.8" packs.
-# (They were on GP6-9, but GP6/7/8 are the 1.14" pack's RGB LED, so idling them
-# low lit the LED white. GP0-3 avoids every Display Pack peripheral.)
-PIN_SPEED_UP = 0                 # remote "speed +" button   (was GP6)
-PIN_SPEED_DOWN = 1               # remote "speed -" button   (was GP7)
-PIN_START = 2                    # remote "start" button     (was GP8)
-PIN_STOP = 3                     # remote "stop" button      (was GP9)
+# --- Treadmill remote interface (STX882 315/433MHz OOK RF transmitter) ------
+# GP27 drives the transmitter's DATA pin directly: HIGH keys the RF carrier,
+# LOW keys it off. Captured button codes (mark/space timings in microseconds)
+# live in rf_codes.py - re-capture and replace those if you wire up a
+# different treadmill/remote.
+# NOTE: on the 2.8" Display Pack, GP27 is also the RGB LED's green channel
+# (see USE_RGB_LED below) - leave USE_RGB_LED off if you use that pack, or
+# move PIN_RF_TX to a free pin.
+PIN_RF_TX = 27                    # STX882 DATA pin
 
-BUTTON_PULSE_MS = 150            # how long a switch stays closed per "press"
-BUTTON_GAP_MS = 150             # pause between consecutive presses
+RF_REPEATS = 4                   # how many times to replay a code per "press"
+RF_REPEAT_GAP_MS = 10            # pause between repeats within one press
+BUTTON_GAP_MS = 150              # pause between consecutive presses
 
 # How much one press of the remote's speed +/- button changes the belt speed.
 # Most treadmills step by 0.1 km/h per press. To achieve SPEED_STEP_KPH (0.5)
@@ -94,10 +92,10 @@ PIN_BUTTON_X = 14                # top-right -> Stop
 DEBOUNCE_MS = 40
 
 # --- On-board RGB LED --------------------------------------------------------
-# Status-LED feature is off for now. On the 1.14" pack the LED is on GP6/7/8;
-# now that the CD4066 has moved to GP0-3, those pins are unused (high-impedance)
-# so the LED stays dark on its own. Pin numbers below follow DISPLAY_MODEL
-# automatically (2.8" pack: GP26/27/28, 1.14" pack: GP6/7/8).
+# Status-LED feature is off for now. Pin numbers below follow DISPLAY_MODEL
+# automatically (2.8" pack: GP26/27/28, 1.14" pack: GP6/7/8). The 2.8" pack's
+# green channel (GP27) clashes with PIN_RF_TX above - keep this off, or move
+# PIN_RF_TX, if you enable it on that pack.
 USE_RGB_LED = False
 PIN_LED_R = _display["led_r"]
 PIN_LED_G = _display["led_g"]

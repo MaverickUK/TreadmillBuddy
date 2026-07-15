@@ -1,8 +1,9 @@
 # Treadmill Buddy
 
 Automated, varied-pace treadmill sessions on a Raspberry Pi Pico + Pimoroni
-**Pico Display Pack**, driving a treadmill's remote through a **CD4066**
-quad bilateral switch. Written for **CircuitPython**. Works with either the
+**Pico Display Pack**, driving a treadmill's remote by replaying its RF codes
+through an **STX882** 315/433MHz OOK transmitter. Written for
+**CircuitPython**. Works with either the
 **2.0"/2.8" pack** (320x240) or the original **1.14" pack** (240x135) — pick
 which one you have via a single setting (see [Choosing your display
 pack](#choosing-your-display-pack)).
@@ -17,7 +18,8 @@ as a bar chart *before* it runs, then tracked live.
 | --------------- | -------------------------------------------------------------- |
 | `settings.py`   | **All** tunable values – timings, speeds, pins, display model. Start here. |
 | `plan.py`       | Generates the per-segment speed plan.                          |
-| `treadmill.py`  | Open-loop CD4066 button-presser + assumed-speed tracking.      |
+| `treadmill.py`  | Open-loop STX882 RF button-presser + assumed-speed tracking.   |
+| `rf_codes.py`   | Captured mark/space RF timings for each remote button.         |
 | `ui.py`         | Renders the five screens with `displayio`.                     |
 | `code.py`       | State machine + button handling. Auto-runs on boot.            |
 
@@ -69,18 +71,25 @@ correctly with no code edits.
 
 ## Wiring
 
-### CD4066 (treadmill remote) — you must match these in `settings.py`
-Driving a pin **HIGH** closes the matching switch = one button press.
+### STX882 (treadmill remote) — you must match these in `settings.py` / `rf_codes.py`
+The transmitter's DATA pin is driven directly from **GP27**: HIGH keys the RF
+carrier, LOW keys it off. Each button press is replayed from a captured
+mark/space timing list in `rf_codes.py` — there's no per-button GPIO, since
+all four "buttons" (`SPEED_UP`, `SPEED_DOWN`, `START`, `STOP`) are just
+different codes sent over the same pin.
 
-| GPIO | CD4066 switch → remote button |
-| ---- | ----------------------------- |
-| 0    | Speed **+**                   |
-| 1    | Speed **−**                   |
-| 2    | **Start**                     |
-| 3    | **Stop**                      |
+| GPIO | STX882 pin |
+| ---- | ---------- |
+| 27   | DATA       |
 
-(GP0–3 are free on both the 1.14" and 2.8" packs. Earlier these were on GP6–9,
-but GP6/7/8 are the 1.14" pack's RGB LED, so idling them lit the LED white.)
+Wire the transmitter's VCC/GND to the Pico's 3.3V/5V (check your module's
+rated voltage) and GND. If you have a different treadmill/remote, capture its
+codes (e.g. with an RTL-SDR or a 315/433MHz receiver + logic analyzer) and
+replace the timing lists in `rf_codes.py`.
+
+GP27 is free on the 1.14" pack. On the 2.8" pack it's also the RGB LED's
+green channel — see the note next to `PIN_RF_TX` in `settings.py` if you use
+that pack with `USE_RGB_LED` on.
 
 ### Pico Display Pack (fixed by the hardware)
 LCD (ST7789, SPI0) and button pins are identical across both packs:
@@ -95,9 +104,8 @@ RGB LED pins differ, and both are set for you by `DISPLAY_MODEL` in
 | 1.14"       | `"1.14"`         | 240x135    | GPIO 6/7/8    |
 
 The RGB LED is common-anode and off by default (`USE_RGB_LED = False`). On
-the 1.14" pack its pins (6/7/8) would otherwise clash with the CD4066 wiring
-below if it were on GP6–9 — that's why the CD4066 uses GP0–3 instead, which
-are free on both packs.
+the 2.8" pack its green channel is GP27, the same pin used for the STX882
+DATA line — leave `USE_RGB_LED` off on that pack (or move `PIN_RF_TX`).
 
 ## Assumptions to verify for YOUR treadmill
 
@@ -110,7 +118,8 @@ presses against an assumed speed. Check these values in `settings.py`:
   START button; the program ramps up from here.
 - `PAUSE_STOPS_BELT` (default **True**) — pause presses STOP and resume presses
   START then ramps back up. Set False if your treadmill can't safely restart.
-- `BUTTON_PULSE_MS` / `BUTTON_GAP_MS` — lengthen if the treadmill misses presses.
+- `RF_REPEATS` / `RF_REPEAT_GAP_MS` / `BUTTON_GAP_MS` — lengthen if the
+  treadmill misses presses.
 
 ## Tuning the session
 
