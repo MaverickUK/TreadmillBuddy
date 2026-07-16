@@ -13,7 +13,7 @@ APP_AUTHOR = "Peter Bridger"
 
 # --- Session plan ------------------------------------------------------------
 SESSION_DURATION_MIN = 45        # total length of a session, minutes
-SPEED_CHANGE_INTERVAL_MIN = 5    # speed is re-evaluated every this many minutes
+SPEED_CHANGE_INTERVAL_MIN = 5 # speed is re-evaluated every this many minutes
 SPEED_STEP_KPH = 0.5             # speed goes up/down by this each interval
 MIN_SPEED_KPH = 2.0              # never go below this
 MAX_SPEED_KPH = 3.5              # never go above this
@@ -121,4 +121,8 @@ SPLASH_DURATION_S = 2            # state 1
 COMPLETED_DURATION_S = 30        # state 5, then back to planning
 
 # --- Derived values (leave these alone) --------------------------------------
-NUM_SEGMENTS = SESSION_DURATION_MIN // SPEED_CHANGE_INTERVAL_MIN
+# int(...) here (rather than relying on `//` alone) keeps this a whole number
+# even when SPEED_CHANGE_INTERVAL_MIN is a fraction of a minute (e.g. 0.25 for
+# 15s segments during quick bench tests) - plain `//` between an int and a
+# float returns a float in Python 3, which breaks range()/list-length uses.
+NUM_SEGMENTS = int(SESSION_DURATION_MIN // SPEED_CHANGE_INTERVAL_MIN)

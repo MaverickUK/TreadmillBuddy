@@ -1,5 +1,10 @@
 # Treadmill Buddy
 
+![Pico Display showing a series of coloured bars representing the planning treadmill workout](images/treadmillbuddy.jpg "Treadmill Buddy")
+
+Do you have a dumb treadmill that only changes speed when you manually press a
+button ono the remote? Well, the Treadmill Buddy will make your dumb treadmill smart
+
 Automated, varied-pace treadmill sessions on a Raspberry Pi Pico + Pimoroni
 **Pico Display Pack**, driving a treadmill's remote by replaying its RF codes
 through an **STX882** 315/433MHz OOK transmitter. Written for
@@ -8,9 +13,23 @@ through an **STX882** 315/433MHz OOK transmitter. Written for
 which one you have via a single setting (see [Choosing your display
 pack](#choosing-your-display-pack)).
 
-A session lasts 45 minutes; every 5 minutes the target speed moves up or down
+By default, a session lasts 45 minutes; every 5 minutes the target speed moves up or down
 by 0.5 km/h, staying between 2.0 and 3.5 km/h. The plan is generated and shown
-as a bar chart *before* it runs, then tracked live.
+as a bar chart before it runs, then tracked live. This can be changed in the settings.py file.
+
+
+### Video demostration
+[![Watch video](https://img.youtube.com/vi/mcWXhySfC0A/mqdefault.jpg)](https://youtu.be/mcWXhySfC0A)
+
+[Watch on YouTube](https://youtu.be/mcWXhySfC0A)
+
+## Hardware
+- Treadmill with 433MHz remote - mine is a [JTX MoveLight Walking Treadmill](https://www.jtxfitness.com/products/jtx-movelight)
+- Raspberry Pi Pico
+- Pimoroni [Pico Display (1.14")](https://shop.pimoroni.com/products/pico-display-pack?variant=32368664215635) or [Pico Display Pack (2.0/2.8")](https://shop.pimoroni.com/products/pico-display-pack-2-8?variant=42047194005587)
+- [433MHz STX882 transmitter](https://www.ebay.co.uk/sch/i.html?_nkw=STX882)
+- Optional: 433MHz SRX882 reciever - for capturing your own treadmill remote codes
+
 
 ## Files
 
@@ -160,3 +179,19 @@ MAX_SPEED_KPH = 4.0
 ```
 
 The number of chart bars and plan length adjust automatically.
+
+### Quick bench-test sessions
+
+`SPEED_CHANGE_INTERVAL_MIN` can be a fraction of a minute, which is handy for
+running a whole session end-to-end in a couple of minutes while testing the
+RF wiring:
+
+```python
+SESSION_DURATION_MIN = 2          # ~2 minutes total
+SPEED_CHANGE_INTERVAL_MIN = 0.25  # 15s segments -> 8 segments
+```
+
+Note the first segment already includes the fixed `TREADMILL_START_DELAY_S`
+countdown (default 5s) before the belt starts ramping, so with 15s segments
+its visible "at speed" time will be shorter than later segments - that's
+expected, not a bug.
