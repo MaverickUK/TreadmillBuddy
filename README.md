@@ -1,6 +1,6 @@
 # Treadmill Buddy
 
-![Pico Display showing a series of coloured bars representing the planning treadmill workout](images/treadmillbuddy.jpg "Treadmill Buddy")
+![Pico Display showing a series of coloured bars representing the planning treadmill workout](/images/treadmillbuddy.jpg "Treadmill Buddy")
 
 Do you have a dumb treadmill that only changes speed when you manually press a
 button ono the remote? Well, the Treadmill Buddy will make your dumb treadmill smart
