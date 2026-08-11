@@ -9,8 +9,11 @@
 # update text / positions / colours and toggle group visibility.
 # =============================================================================
 
+import time
+
 import board
 import busio
+import digitalio
 import displayio
 import vectorio
 import terminalio
@@ -33,6 +36,14 @@ GREY = 0x787878
 GREEN = 0x00D25A
 AMBER = 0xFFAA00
 ACCENT = 0x00C8FF
+
+# terminalio's built-in font is a fixed 6x8 pixel cell - text sizing below
+# multiplies these by the label's scale.
+GLYPH_W = 6
+GLYPH_H = 8
+
+# planning-screen edit modes (which field X/Y adjust; B swaps between them)
+EDIT_TIME, EDIT_INTENSITY = range(2)
 
 
 def _pin(number):
@@ -64,8 +75,9 @@ def _speed_color(speed):
     Routing through yellow keeps the middle speeds vivid and distinct instead of
     the muddy brown a straight green->red blend would give.
     """
-    span = settings.MAX_SPEED_KPH - settings.MIN_SPEED_KPH
-    t = 0.0 if span <= 0 else _clamp01((speed - settings.MIN_SPEED_KPH) / span)
+    lo, hi = settings.MIN_SPEED_KPH, settings.MAX_SPEED_KPH
+    span = hi - lo
+    t = 0.0 if span <= 0 else _clamp01((speed - lo) / span)
     if t < 0.5:                          # green -> yellow
         u = t / 0.5
         r, g, b = _lerp(0, 240, u), _lerp(200, 210, u), _lerp(60, 0, u)
@@ -81,6 +93,15 @@ PAST_GRAY = 0x555555
 class UI:
     def __init__(self):
         displayio.release_displays()
+
+        # Backlight first, and OFF: from power-up until the ST7789 is
+        # initialised its frame RAM holds garbage, which shows as a second or
+        # two of noise. We drive the backlight ourselves (rather than handing
+        # the pin to ST7789, which switches it on immediately) and only turn it
+        # on once a black, fully-built first frame has been pushed out.
+        self._backlight = digitalio.DigitalInOut(_pin(settings.PIN_LCD_BL))
+        self._backlight.switch_to_output(value=False)
+
         spi = busio.SPI(clock=_pin(settings.PIN_LCD_SCK), MOSI=_pin(settings.PIN_LCD_MOSI))
         bus = FourWire(spi, command=_pin(settings.PIN_LCD_DC),
                        chip_select=_pin(settings.PIN_LCD_CS))
@@ -91,16 +112,15 @@ class UI:
             rowstart=settings.DISPLAY_ROWSTART,
             colstart=settings.DISPLAY_COLSTART,
             rotation=settings.DISPLAY_ROTATION,
-            backlight_pin=_pin(settings.PIN_LCD_BL),
         )
-        try:
-            self.display.brightness = 1.0
-        except Exception:
-            pass
+        self.display.auto_refresh = False
 
         self.W = self.display.width
         self.H = self.display.height
         self._layout()
+
+        self.cfg = plan_lib.SessionConfig()   # replaced by planning()/session()
+        self._active_bars = 0
 
         self.root = displayio.Group()
         self.display.root_group = self.root
@@ -109,10 +129,24 @@ class UI:
         self._build_splash()
         self._build_content()
         self._build_completed()
+        self._build_alert()
 
         self.g_splash.hidden = True
         self.g_content.hidden = True
         self.g_completed.hidden = True
+        self.g_alert.hidden = True
+
+        self._first_frame()
+
+    def _first_frame(self):
+        """Push the (all-black) scene out, then light the panel up."""
+        for _ in range(10):
+            if self.display.refresh(minimum_frames_per_second=0):
+                break
+            time.sleep(0.02)
+        self.display.auto_refresh = True
+        time.sleep(0.05)
+        self._backlight.value = True
 
     # -- layout profile (depends on panel size) -------------------------------
     def _layout(self):
@@ -120,17 +154,16 @@ class UI:
         self.big = big
 
         self.chart_left = 12 if big else 6
-        self.chart_top = 88 if big else 44
+        self.chart_top = 90 if big else 48
         self.chart_bottom = self.H - (16 if big else 12)
-
-        area = self.W - 2 * self.chart_left
-        self.barw = int((area / settings.NUM_SEGMENTS) * 0.72)
 
         # text scales
         self.s_splash = 5 if big else 2
         self.s_author = 2 if big else 1
         self.s_title = 3 if big else 2
         self.s_sub = 2 if big else 1
+        self.s_mode = 2 if big else 1
+        self.s_hint = 1
         self.s_speed = 6 if big else 3
         self.s_kmh = 2 if big else 1
         self.s_ttl = 1
@@ -156,23 +189,37 @@ class UI:
     # -- screen construction --------------------------------------------------
     def _build_splash(self):
         self.g_splash = displayio.Group()
-        name_y = 90 if self.big else 45
-        auth_y = 165 if self.big else 82
-        self.g_splash.append(self._label(settings.APP_NAME, self.s_splash, ACCENT,
-                                         self.W // 2, name_y, (0.5, 0.5)))
+
+        # "TREADMILL BUDDY" at splash scale is far wider than either panel, so
+        # break it onto one line per word and shrink the scale until the
+        # longest word fits.
+        words = settings.APP_NAME.split() or [settings.APP_NAME]
+        longest = max(len(w) for w in words)
+        scale = self.s_splash
+        while scale > 1 and longest * GLYPH_W * scale > self.W - 16:
+            scale -= 1
+
+        line_h = GLYPH_H * scale + (10 if self.big else 4)
+        centre_y = int(self.H * 0.38)
+        top_y = centre_y - (len(words) - 1) * line_h // 2
+        for i, word in enumerate(words):
+            self.g_splash.append(self._label(word, scale, ACCENT, self.W // 2,
+                                             top_y + i * line_h, (0.5, 0.5)))
+
+        auth_y = 175 if self.big else 90
         self.g_splash.append(self._label("by " + settings.APP_AUTHOR, self.s_author,
                                          GREY, self.W // 2, auth_y, (0.5, 0.5)))
         self.root.append(self.g_splash)
 
     def _build_content(self):
         self.g_content = displayio.Group()
-        n = settings.NUM_SEGMENTS
+        n = settings.MAX_NUM_SEGMENTS      # worst case; extras get hidden
 
         # bars + value labels
         self.bars = []
         self.bar_labels = []
         for _ in range(n):
-            r = self._rect(self.barw, 14, 0, 0, GREEN)
+            r = self._rect(1, 14, 0, 0, GREEN)
             self.g_content.append(r)
             self.bars.append(r)
         for _ in range(n):
@@ -224,15 +271,22 @@ class UI:
             self.g_running.append(lbl)
         self.g_content.append(self.g_running)
 
-        # planning-only text
+        # planning-only text: title, the two adjustable fields (the one B has
+        # selected is highlighted), and a hint line.
         self.g_planning = displayio.Group()
-        title_y = 22 if self.big else 12
-        sub_y = 52 if self.big else 30
+        if self.big:
+            title_y, mode_y, hint_y = 20, 52, 78
+        else:
+            title_y, mode_y, hint_y = 10, 27, 39
         self.title = self._label("SESSION PLAN", self.s_title, WHITE,
                                  self.W // 2, title_y, (0.5, 0.5))
-        self.subtitle = self._label("", self.s_sub, GREY, self.W // 2, sub_y, (0.5, 0.5))
-        self.g_planning.append(self.title)
-        self.g_planning.append(self.subtitle)
+        self.time_lbl = self._label("", self.s_mode, ACCENT,
+                                    self.chart_left, mode_y, (0.0, 0.5))
+        self.intensity_lbl = self._label("", self.s_mode, GREY,
+                                         self.W - self.chart_left, mode_y, (1.0, 0.5))
+        self.hint = self._label("", self.s_hint, GREY, self.W // 2, hint_y, (0.5, 0.5))
+        for lbl in (self.title, self.time_lbl, self.intensity_lbl, self.hint):
+            self.g_planning.append(lbl)
         self.g_content.append(self.g_planning)
 
         # paused overlay (front-most)
@@ -276,61 +330,132 @@ class UI:
         self.g_completed.append(self.cmp_count)
         self.root.append(self.g_completed)
 
+    def _build_alert(self):
+        """Full-screen speed-change screen: one big triangle on black.
+
+        Both triangles are built up front and share a palette, so showing one
+        is just a hidden flag plus a colour write.
+        """
+        self.g_alert = displayio.Group()
+        self.g_alert.append(self._rect(self.W, self.H, 0, 0, BLACK))
+
+        margin = 10
+        th = self.H - 2 * margin
+        tw = min(self.W - 2 * margin, int(self.H * 1.05))
+        x = (self.W - tw) // 2
+        y = margin
+
+        self._alert_pal = displayio.Palette(1)
+        self._alert_pal[0] = GREEN
+        self.tri_up = vectorio.Polygon(
+            pixel_shader=self._alert_pal,
+            points=[(0, th), (tw, th), (tw // 2, 0)], x=x, y=y)
+        self.tri_down = vectorio.Polygon(
+            pixel_shader=self._alert_pal,
+            points=[(0, 0), (tw, 0), (tw // 2, th)], x=x, y=y)
+        self.g_alert.append(self.tri_up)
+        self.g_alert.append(self.tri_down)
+        self.root.append(self.g_alert)
+
     # -- bar geometry (recomputed only when the plan changes) -----------------
-    def _apply_plan(self, plan):
-        span = settings.MAX_SPEED_KPH - settings.MIN_SPEED_KPH
+    def _apply_plan(self, plan, cfg):
+        lo = settings.MIN_SPEED_KPH
+        span = settings.MAX_SPEED_KPH - lo
         usable = self.chart_bottom - self.chart_top
         min_bar = 14 if self.big else 10
-        slot = (self.W - 2 * self.chart_left) / len(plan)
+        area = self.W - 2 * self.chart_left
+        slot = area / len(plan)
 
+        # Bars butt up against each other: each one runs from its slot's left
+        # edge to the next one's, so rounding never leaves a gap.
         for i, s in enumerate(plan):
-            frac = 0.0 if span <= 0 else _clamp01((s - settings.MIN_SPEED_KPH) / span)
+            frac = 0.0 if span <= 0 else _clamp01((s - lo) / span)
             h = int(min_bar + frac * (usable - min_bar))
-            x = int(self.chart_left + i * slot + (slot - self.barw) / 2)
+            x = int(self.chart_left + i * slot)
+            w = max(1, int(self.chart_left + (i + 1) * slot) - x)
             y = self.chart_bottom - h
 
             r = self.bars[i]
-            r.width = self.barw
+            r.hidden = False
+            r.width = w
             r.height = h
             r.x = x
             r.y = y
             r.pixel_shader[0] = _speed_color(s)
 
             lb = self.bar_labels[i]
+            # "0.0" needs 3 glyphs; drop the labels rather than let them
+            # overlap once the bars get narrow (long sessions).
+            lb.hidden = w < 3 * GLYPH_W * self.s_bar
             lb.text = "%.1f" % s
-            lb.anchored_position = (int(x + self.barw / 2), y - 2)
+            lb.anchored_position = (int(x + w / 2), y - 2)
+
+        for i in range(len(plan), len(self.bars)):
+            self.bars[i].hidden = True
+            self.bar_labels[i].hidden = True
+            self.bar_overlays[i].hidden = True
+
+        self._active_bars = len(plan)
+        self.cfg = cfg
 
     # -- public screen API ----------------------------------------------------
     def splash(self):
         self.g_splash.hidden = False
         self.g_content.hidden = True
         self.g_completed.hidden = True
+        self.g_alert.hidden = True
 
-    def planning(self, plan):
-        self._apply_plan(plan)
-        if self.big:
-            self.subtitle.text = "%d min  %.2f km  -  press A" % (
-                settings.SESSION_DURATION_MIN, plan_lib.planned_distance_km(plan))
-        else:
-            self.subtitle.text = "%dmin %.1fkm - press A" % (
-                settings.SESSION_DURATION_MIN, plan_lib.planned_distance_km(plan))
+    def planning(self, plan, cfg, edit_mode=EDIT_TIME):
+        self._apply_plan(plan, cfg)
+
+        # the boost reads as a running total: every X press is +0.5 km/h across
+        # the session, every Y press takes 0.5 back off again
+        kph = cfg.boost_kph
+        sign = "+" if kph > 0 else ("-" if kph < 0 else "")
+        self.time_lbl.text = "TIME %dm" % cfg.duration_min
+        self.intensity_lbl.text = "SPEED %s%.1f" % (sign, abs(kph))
+        editing_time = edit_mode == EDIT_TIME
+        self.time_lbl.color = ACCENT if editing_time else GREY
+        self.intensity_lbl.color = GREY if editing_time else ACCENT
+        self.hint.text = "%.2f km   X + / Y -   B swap   A start" % (
+            plan_lib.planned_distance_km(plan),)
 
         self.g_splash.hidden = True
         self.g_completed.hidden = True
+        self.g_alert.hidden = True
         self.g_content.hidden = False
         self.g_planning.hidden = False
         self.g_running.hidden = True
         self.g_paused.hidden = True
         self.g_starting.hidden = True
 
-    def starting(self, plan):
+    def starting(self, plan, cfg, edit_mode=EDIT_TIME):
         """Planning chart with a big STARTING overlay (immediate A feedback)."""
-        self.planning(plan)
+        self.planning(plan, cfg, edit_mode)
         self.g_starting.hidden = False
 
-    def session(self, plan, seg, elapsed_s, total_s, speed, paused):
+    def speed_change(self, speed, direction):
+        """Blank the screen and show one big triangle for a speed change.
+
+        `direction` is +1 (speeding up) or -1 (slowing down); the triangle is
+        drawn in the colour of `speed`, i.e. the stage about to start.
+        """
+        self._alert_pal[0] = _speed_color(speed)
+        self.tri_up.hidden = direction < 0
+        self.tri_down.hidden = direction > 0
+
+        self.g_splash.hidden = True
+        self.g_content.hidden = True
+        self.g_completed.hidden = True
+        self.g_alert.hidden = False
+
+    def session(self, plan, cfg, seg, elapsed_s, total_s, speed, paused):
+        if self._active_bars != len(plan) or self.cfg is not cfg:
+            self._apply_plan(plan, cfg)
+
         self.g_splash.hidden = True
         self.g_completed.hidden = True
+        self.g_alert.hidden = True
         self.g_content.hidden = False
         self.g_planning.hidden = True
         self.g_running.hidden = False
@@ -347,7 +472,8 @@ class UI:
         self.progress.x = progress_x
 
         # grey out the passed part of each bar; split the bar under the tracker
-        for i, bar in enumerate(self.bars):
+        for i in range(self._active_bars):
+            bar = self.bars[i]
             overlay = self.bar_overlays[i]
             left = bar.x
             right = bar.x + bar.width
@@ -375,6 +501,7 @@ class UI:
 
         self.g_splash.hidden = True
         self.g_content.hidden = True
+        self.g_alert.hidden = True
         self.g_completed.hidden = False
 
     def show_error(self, message):
@@ -402,4 +529,5 @@ class UI:
         self.g_splash.hidden = True
         self.g_content.hidden = True
         self.g_completed.hidden = True
+        self.g_alert.hidden = True
         self.g_error.hidden = False

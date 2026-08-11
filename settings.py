@@ -12,12 +12,27 @@ APP_NAME = "Treadmill Buddy"
 APP_AUTHOR = "Peter Bridger"
 
 # --- Session plan ------------------------------------------------------------
-SESSION_DURATION_MIN = 45        # total length of a session, minutes
+SESSION_DURATION_MIN = 60        # default length of a session, minutes
 SPEED_CHANGE_INTERVAL_MIN = 5 # speed is re-evaluated every this many minutes
 SPEED_STEP_KPH = 0.5             # speed goes up/down by this each interval
 MIN_SPEED_KPH = 2.0              # never go below this
 MAX_SPEED_KPH = 3.5              # never go above this
 START_SPEED_KPH = 2.0            # speed for the first segment of the plan
+
+# --- Planning-screen adjustments (buttons X / Y / B) --------------------------
+# On the planning screen X raises and Y lowers whichever field B has selected:
+#   TIME      -> session length, in TIME_STEP_MIN steps
+#   INTENSITY -> adds SPEED_STEP_KPH to the plan (X) or takes it away again (Y),
+#                one segment at a time: X lifts the slowest segment, Y drops the
+#                fastest, so one press = +/- SPEED_STEP_KPH across the whole
+#                session and you can see exactly which bar moved. The random
+#                walk underneath is untouched, so the profile's shape stays put
+#                while you tune. Limits come from MIN/MAX_SPEED_KPH: at the top
+#                every segment sits at MAX_SPEED_KPH, at the bottom every
+#                segment sits at MIN_SPEED_KPH.
+TIME_STEP_MIN = 5
+MIN_SESSION_DURATION_MIN = 5
+MAX_SESSION_DURATION_MIN = 120
 
 # Plan generation:
 #   True  -> a fresh random "walk" each session (+/- SPEED_STEP each interval,
@@ -79,7 +94,7 @@ PIN_LCD_BL = 20                  # backlight
 # DISPLAY_WIDTH/HEIGHT (see UI._layout's `big` flag).
 #   "2.8"  -> 320x240 Pico Display Pack 2.0" / 2.8"
 #   "1.14" -> 240x135 Pico Display Pack (original)
-DISPLAY_MODEL = "1.14"
+DISPLAY_MODEL = "2.8" # "1.14"
 
 _DISPLAY_PROFILES = {
     "2.8": dict(width=320, height=240, rowstart=0, colstart=0, rotation=270,
@@ -99,9 +114,9 @@ DISPLAY_ROTATION = _display["rotation"]
 # Physical layout on the 2.8" pack:  A = top-left, B = bottom-left,
 #                                    X = top-right, Y = bottom-right.
 PIN_BUTTON_A = 12                # top-left    -> Play / Pause / Resume
-PIN_BUTTON_B = 13                # bottom-left -> unused by code.py (used by debug_rf.py)
-PIN_BUTTON_X = 14                # top-right   -> Stop
-PIN_BUTTON_Y = 15                # bottom-right -> unused by code.py (used by debug_rf.py)
+PIN_BUTTON_B = 13                # bottom-left -> planning: swap TIME/INTENSITY
+PIN_BUTTON_X = 14                # top-right   -> Stop; planning: increase
+PIN_BUTTON_Y = 15                # bottom-right -> planning: decrease
 DEBOUNCE_MS = 40
 
 # --- On-board RGB LED --------------------------------------------------------
@@ -120,9 +135,18 @@ LED_BRIGHTNESS = 0.5             # 0.0 - 1.0 scaling applied to LED colours
 SPLASH_DURATION_S = 2            # state 1
 COMPLETED_DURATION_S = 30        # state 5, then back to planning
 
+# How long the full-screen speed-change triangle is shown for when a session
+# crosses into a segment with a different target speed.
+SPEED_CHANGE_ALERT_S = 4
+
 # --- Derived values (leave these alone) --------------------------------------
+# The segment count for the *current* session lives on plan.SessionConfig
+# (session length is adjustable at runtime); this is the worst case, which
+# ui.py uses to build its bars up front, hiding the ones a shorter session
+# doesn't need.
+#
 # int(...) here (rather than relying on `//` alone) keeps this a whole number
 # even when SPEED_CHANGE_INTERVAL_MIN is a fraction of a minute (e.g. 0.25 for
 # 15s segments during quick bench tests) - plain `//` between an int and a
 # float returns a float in Python 3, which breaks range()/list-length uses.
-NUM_SEGMENTS = int(SESSION_DURATION_MIN // SPEED_CHANGE_INTERVAL_MIN)
+MAX_NUM_SEGMENTS = int(MAX_SESSION_DURATION_MIN // SPEED_CHANGE_INTERVAL_MIN)

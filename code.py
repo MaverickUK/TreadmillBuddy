@@ -8,8 +8,10 @@
 #         fresh PLANNING screen.
 #
 # Buttons (2.8" Pico Display Pack):
-#   A (top-left)  = Play / Pause / Resume
-#   X (top-right) = Stop
+#   A (top-left)     = Play / Pause / Resume
+#   B (bottom-left)  = planning: swap between adjusting TIME and INTENSITY
+#   X (top-right)    = planning: increase the selected field; running: Stop
+#   Y (bottom-right) = planning: decrease the selected field
 # =============================================================================
 
 import sys
@@ -23,16 +25,16 @@ print("=== Treadmill Buddy: code.py starting ===")
 import settings
 import plan as plan_lib
 from treadmill import TreadmillController
-from ui import UI
+from ui import UI, EDIT_TIME, EDIT_INTENSITY
 
 # --- states ---
 SPLASH, PLANNING, RUNNING, PAUSED, COMPLETED = range(5)
 
 # --- derived timings (seconds) ---
-TOTAL_S = settings.SESSION_DURATION_MIN * 60
 INTERVAL_S = settings.SPEED_CHANGE_INTERVAL_MIN * 60
 COMPLETED_S = settings.COMPLETED_DURATION_S
 DEBOUNCE_S = settings.DEBOUNCE_MS / 1000.0
+ALERT_S = settings.SPEED_CHANGE_ALERT_S
 
 
 def _pin(number):
@@ -83,9 +85,9 @@ class StatusLED:
             channel.duty_cycle = duty
 
 
-def segment_for(elapsed_s):
+def segment_for(elapsed_s, cfg):
     seg = int(elapsed_s // INTERVAL_S)
-    return seg if seg < settings.NUM_SEGMENTS else settings.NUM_SEGMENTS - 1
+    return seg if seg < cfg.num_segments else cfg.num_segments - 1
 
 
 _ui_ref = None
@@ -100,7 +102,9 @@ def main():
     treadmill = TreadmillController()
     led = StatusLED()
     btn_a = Button(settings.PIN_BUTTON_A)
+    btn_b = Button(settings.PIN_BUTTON_B)
     btn_x = Button(settings.PIN_BUTTON_X)
+    btn_y = Button(settings.PIN_BUTTON_Y)
     print("- I/O ready, entering state machine")
 
     # ----- state 1: splash -----
@@ -109,66 +113,97 @@ def main():
     time.sleep(settings.SPLASH_DURATION_S)
 
     # ----- state 2: planning -----
-    plan = plan_lib.generate_plan()
+    # base_plan is the raw random walk; plan is that walk with the user's
+    # intensity boost laid on top. Keeping the base around means tuning the
+    # intensity moves one bar at a time instead of re-rolling the whole chart.
+    cfg = plan_lib.SessionConfig()
+    base_plan = plan_lib.generate_plan(cfg)
+    plan = plan_lib.apply_boost(base_plan, cfg.boost)
+    edit_mode = EDIT_TIME
     state = PLANNING
 
     elapsed_s = 0.0        # accumulated running time (excludes pauses)
     last_tick = 0.0        # monotonic time of the previous RUNNING update
     applied_seg = -1       # last segment whose speed we sent to the treadmill
     completed_at = 0.0
+    alert_until = 0.0      # while > now, the speed-change triangle owns the screen
 
     while True:
         a = btn_a.pressed()
+        b = btn_b.pressed()
         x = btn_x.pressed()
+        y = btn_y.pressed()
 
         if state == PLANNING:
             led.set(0, 90, 200)
-            ui.planning(plan)
+            ui.planning(plan, cfg, edit_mode)
             if a:                                   # start the session
-                ui.starting(plan)                   # instant feedback...
+                ui.starting(plan, cfg, edit_mode)   # instant feedback...
                 time.sleep(0.05)                    # ...let it paint before we block
                 treadmill.start()                   # (this ramp blocks a few seconds)
                 treadmill.set_speed(plan[0])
                 applied_seg = 0
                 elapsed_s = 0.0
+                alert_until = 0.0
                 last_tick = time.monotonic()
                 state = RUNNING
-            elif x:                                 # regenerate a fresh plan
-                plan = plan_lib.generate_plan()
+            elif b:                                 # swap which field X/Y change
+                edit_mode = EDIT_INTENSITY if edit_mode == EDIT_TIME else EDIT_TIME
+            elif x or y:                            # adjust the selected field
+                steps = 1 if x else -1
+                if edit_mode == EDIT_TIME:
+                    if cfg.adjust_time(steps):      # new length -> new walk
+                        base_plan = plan_lib.generate_plan(cfg)
+                        cfg.clamp_boost(base_plan)
+                        plan = plan_lib.apply_boost(base_plan, cfg.boost)
+                elif cfg.adjust_boost(steps, base_plan):
+                    plan = plan_lib.apply_boost(base_plan, cfg.boost)
 
         elif state == RUNNING:
             now = time.monotonic()
             elapsed_s += now - last_tick
             last_tick = now
 
-            seg = segment_for(elapsed_s)
+            seg = segment_for(elapsed_s, cfg)
             if seg != applied_seg:                  # crossed into a new segment
-                treadmill.set_speed(plan[seg])
+                target = plan[seg]
+                if applied_seg >= 0 and target != plan[applied_seg]:
+                    # blank the screen for a big up/down triangle in the colour
+                    # of the stage that's just starting
+                    ui.speed_change(target, 1 if target > plan[applied_seg] else -1)
+                    alert_until = time.monotonic() + ALERT_S
+                treadmill.set_speed(target)
                 applied_seg = seg
                 last_tick = time.monotonic()        # don't count the ramp time
 
-            if elapsed_s >= TOTAL_S:                # -> state 5
+            if elapsed_s >= cfg.total_s:            # -> state 5
                 treadmill.stop()
                 completed_at = time.monotonic()
+                alert_until = 0.0
                 state = COMPLETED
             elif a:                                 # -> state 4 (pause)
                 if settings.PAUSE_STOPS_BELT:
                     treadmill.stop()
+                alert_until = 0.0
                 state = PAUSED
             elif x:                                 # -> new plan
                 treadmill.stop()
-                plan = plan_lib.generate_plan()
+                base_plan = plan_lib.generate_plan(cfg)   # keep the user's boost
+                plan = plan_lib.apply_boost(base_plan, cfg.boost)
                 applied_seg = -1
+                alert_until = 0.0
                 state = PLANNING
+            elif time.monotonic() < alert_until:    # triangle still showing
+                led.set(0, 210, 90)
             else:
                 led.set(0, 210, 90)
-                ui.session(plan, seg, elapsed_s, TOTAL_S,
+                ui.session(plan, cfg, seg, elapsed_s, cfg.total_s,
                            treadmill.current_speed, paused=False)
 
         elif state == PAUSED:
             led.set(255, 150, 0)
-            seg = segment_for(elapsed_s)
-            ui.session(plan, seg, elapsed_s, TOTAL_S, plan[seg], paused=True)
+            seg = segment_for(elapsed_s, cfg)
+            ui.session(plan, cfg, seg, elapsed_s, cfg.total_s, plan[seg], paused=True)
             if a:                                   # resume -> state 3
                 if settings.PAUSE_STOPS_BELT:
                     treadmill.start()
@@ -177,7 +212,8 @@ def main():
                 state = RUNNING
             elif x:                                 # -> new plan
                 treadmill.stop()
-                plan = plan_lib.generate_plan()
+                base_plan = plan_lib.generate_plan(cfg)   # keep the user's boost
+                plan = plan_lib.apply_boost(base_plan, cfg.boost)
                 applied_seg = -1
                 state = PLANNING
 
@@ -186,7 +222,8 @@ def main():
             left = COMPLETED_S - (time.monotonic() - completed_at)
             ui.completed(plan, elapsed_s, left)
             if left <= 0 or a or x:                 # -> state 2
-                plan = plan_lib.generate_plan()
+                base_plan = plan_lib.generate_plan(cfg)   # keep the user's boost
+                plan = plan_lib.apply_boost(base_plan, cfg.boost)
                 applied_seg = -1
                 state = PLANNING
 

@@ -13,9 +13,11 @@ through an **STX882** 315/433MHz OOK transmitter. Written for
 which one you have via a single setting (see [Choosing your display
 pack](#choosing-your-display-pack)).
 
-By default, a session lasts 45 minutes; every 5 minutes the target speed moves up or down
+By default, a session lasts 60 minutes; every 5 minutes the target speed moves up or down
 by 0.5 km/h, staying between 2.0 and 3.5 km/h. The plan is generated and shown
-as a bar chart before it runs, then tracked live. This can be changed in the settings.py file.
+as a bar chart before it runs, then tracked live. Session length and intensity can be
+adjusted on the planning screen (see [Buttons](#buttons)); the defaults and limits live
+in the settings.py file.
 
 
 ### Video demostration
@@ -41,6 +43,7 @@ as a bar chart before it runs, then tracked live. This can be changed in the set
 | `rf_codes.py`   | Captured mark/space RF timings for each remote button.         |
 | `ui.py`         | Renders the five screens with `displayio`.                     |
 | `code.py`       | State machine + button handling. Auto-runs on boot.            |
+| `boot.py`       | Holds the LCD backlight off during boot (no start-up noise).   |
 | `debug_rf.py`   | Standalone hardware test: A/B/X/Y fire Start/Stop/Up/Down.     |
 
 ## Install
@@ -75,19 +78,35 @@ correctly with no code edits.
 ## The five screens
 
 1. **Splash** – app name + author, 2 s.
-2. **Planning** – bar chart of the planned trip; press **A** to start.
+2. **Planning** – bar chart of the planned trip, with the adjustable session
+   length and speed band; press **A** to start.
 3. **Running** – live position on the chart, current speed, elapsed & remaining.
-4. **Paused** – as running, with a "PAUSED" overlay (amber LED).
-5. **Completed** – summary for 30 s, then back to a fresh plan.
+4. **Speed change** – whenever the plan moves to a new speed, the screen blanks
+   for a few seconds and shows one big triangle, pointing up or down, in the
+   colour of the stage that's starting.
+5. **Paused** – as running, with a "PAUSED" overlay (amber LED).
+6. **Completed** – summary for 30 s, then back to a fresh plan.
 
 ## Buttons
 
-| Button | Position   | Action                                                        |
-| ------ | ---------- | ------------------------------------------------------------- |
-| **A**  | top-left   | Planning→start, Running→pause, Paused→resume                  |
-| **X**  | top-right  | Planning→regenerate plan, Running/Paused→stop to a new plan   |
+| Button | Position     | Action                                                      |
+| ------ | ------------ | ----------------------------------------------------------- |
+| **A**  | top-left     | Planning→start, Running→pause, Paused→resume                |
+| **B**  | bottom-left  | Planning→swap between adjusting TIME and INTENSITY          |
+| **X**  | top-right    | Planning→increase, Running/Paused→stop to a new plan        |
+| **Y**  | bottom-right | Planning→decrease                                           |
 
-(B and Y are unused. Any button also skips the Completed screen early.)
+On the planning screen **B** selects which field **X** / **Y** change:
+
+- **TIME** – session length, in 5-minute steps (5–120 minutes). A new random
+  walk is generated to fill the new length.
+- **INTENSITY** – adds 0.5 km/h to the session per press, or takes it back off.
+  Each press moves exactly one bar: **X** lifts the slowest segment, **Y** drops
+  the fastest, so the plan's shape stays put while the total (and the distance
+  on screen) goes up or down by a predictable amount. It stops when every
+  segment has reached `MAX_SPEED_KPH` — or, going down, `MIN_SPEED_KPH`.
+
+(Any button also skips the Completed screen early.)
 
 ## Wiring
 
