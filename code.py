@@ -140,8 +140,10 @@ def main():
             if a:                                   # start the session
                 ui.starting(plan, cfg, edit_mode)   # instant feedback...
                 time.sleep(0.05)                    # ...let it paint before we block
+                ui.pause_refresh()                  # keep the display quiet for the RF burst
                 treadmill.start()                   # (this ramp blocks a few seconds)
                 treadmill.set_speed(plan[0])
+                ui.resume_refresh()
                 applied_seg = 0
                 elapsed_s = 0.0
                 alert_until = 0.0
@@ -172,22 +174,30 @@ def main():
                     # of the stage that's just starting
                     ui.speed_change(target, 1 if target > plan[applied_seg] else -1)
                     alert_until = time.monotonic() + ALERT_S
+                ui.pause_refresh()                  # keep the display quiet for the RF burst
                 treadmill.set_speed(target)
+                ui.resume_refresh()
                 applied_seg = seg
                 last_tick = time.monotonic()        # don't count the ramp time
 
             if elapsed_s >= cfg.total_s:            # -> state 5
+                ui.pause_refresh()
                 treadmill.stop()
+                ui.resume_refresh()
                 completed_at = time.monotonic()
                 alert_until = 0.0
                 state = COMPLETED
             elif a:                                 # -> state 4 (pause)
                 if settings.PAUSE_STOPS_BELT:
+                    ui.pause_refresh()
                     treadmill.stop()
+                    ui.resume_refresh()
                 alert_until = 0.0
                 state = PAUSED
             elif x:                                 # -> new plan
+                ui.pause_refresh()
                 treadmill.stop()
+                ui.resume_refresh()
                 base_plan = plan_lib.generate_plan(cfg)   # keep the user's boost
                 plan = plan_lib.apply_boost(base_plan, cfg.boost)
                 applied_seg = -1
@@ -206,12 +216,16 @@ def main():
             ui.session(plan, cfg, seg, elapsed_s, cfg.total_s, plan[seg], paused=True)
             if a:                                   # resume -> state 3
                 if settings.PAUSE_STOPS_BELT:
+                    ui.pause_refresh()
                     treadmill.start()
                     treadmill.set_speed(plan[seg])
+                    ui.resume_refresh()
                 last_tick = time.monotonic()        # ignore time spent paused
                 state = RUNNING
             elif x:                                 # -> new plan
+                ui.pause_refresh()
                 treadmill.stop()
+                ui.resume_refresh()
                 base_plan = plan_lib.generate_plan(cfg)   # keep the user's boost
                 plan = plan_lib.apply_boost(base_plan, cfg.boost)
                 applied_seg = -1

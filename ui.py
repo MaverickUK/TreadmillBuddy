@@ -148,6 +148,17 @@ class UI:
         time.sleep(0.05)
         self._backlight.value = True
 
+    # -- refresh control --------------------------------------------------
+    def pause_refresh(self):
+        """Stop background auto-refresh so nothing competes for the CPU/SPI
+        bus during time-critical work (e.g. an RF burst)."""
+        self.display.auto_refresh = False
+
+    def resume_refresh(self):
+        """Push out anything drawn while paused, then resume auto-refresh."""
+        self.display.refresh()
+        self.display.auto_refresh = True
+
     # -- layout profile (depends on panel size) -------------------------------
     def _layout(self):
         big = self.H >= 160
