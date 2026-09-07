@@ -450,7 +450,15 @@ class UI:
 
         `direction` is +1 (speeding up) or -1 (slowing down); the triangle is
         drawn in the colour of `speed`, i.e. the stage about to start.
+
+        Auto-refresh is paused across all of this and the frame is pushed out
+        once at the end - otherwise the colour swap, the triangle-visibility
+        flip and the group-hidden changes below can each get pushed to the
+        panel as separate partial frames, which shows up as a visible glitch
+        (e.g. the old triangle briefly in the new colour, or a flash of the
+        content screen) during the transition.
         """
+        self.pause_refresh()
         self._alert_pal[0] = _speed_color(speed)
         self.tri_up.hidden = direction < 0
         self.tri_down.hidden = direction > 0
@@ -459,6 +467,7 @@ class UI:
         self.g_content.hidden = True
         self.g_completed.hidden = True
         self.g_alert.hidden = False
+        self.resume_refresh()
 
     def session(self, plan, cfg, seg, elapsed_s, total_s, speed, paused):
         if self._active_bars != len(plan) or self.cfg is not cfg:
