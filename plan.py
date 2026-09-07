@@ -140,27 +140,80 @@ def apply_boost(base_plan, steps):
     the valleys fill in first and the total climbs by exactly SPEED_STEP_KPH
     per press. Going down, each step drops the fastest segment. Segments that
     have reached MAX/MIN_SPEED_KPH are skipped, so nothing leaves the band.
+
+    A segment is also skipped if bumping it would make it equal to either
+    neighbour - every segment boundary must be a real speed change, so the
+    treadmill isn't sent a no-op speed at the point it's supposed to move -
+    unless every remaining candidate would tie a neighbour, in which case one
+    is allowed through rather than dropping the press entirely. Any tie that
+    slips through anyway (e.g. boost extremes pin several segments to the same
+    limit) is cleaned up afterwards by _dedupe_adjacent().
     """
     plan = list(base_plan)
     step = settings.SPEED_STEP_KPH
     up = steps > 0
 
     for _ in range(abs(steps)):
-        pick = -1
-        for i, s in enumerate(plan):
-            if up:
-                if s >= settings.MAX_SPEED_KPH:
-                    continue
-                if pick < 0 or s < plan[pick]:
-                    pick = i
-            else:
-                if s <= settings.MIN_SPEED_KPH:
-                    continue
-                if pick < 0 or s > plan[pick]:
-                    pick = i
+        pick = _pick_boost_segment(plan, up, step, avoid_ties=True)
+        if pick < 0:
+            pick = _pick_boost_segment(plan, up, step, avoid_ties=False)
         if pick < 0:                    # fully boosted / fully backed off
             break
         plan[pick] = round(plan[pick] + (step if up else -step), 1)
+
+    return _dedupe_adjacent(plan)
+
+
+def _pick_boost_segment(plan, up, step, avoid_ties):
+    """Pick the segment apply_boost() should nudge next, or -1 if none qualify."""
+    pick = -1
+    for i, s in enumerate(plan):
+        if up:
+            if s >= settings.MAX_SPEED_KPH:
+                continue
+        else:
+            if s <= settings.MIN_SPEED_KPH:
+                continue
+
+        if avoid_ties:
+            new_val = round(s + (step if up else -step), 1)
+            if i > 0 and plan[i - 1] == new_val:
+                continue
+            if i < len(plan) - 1 and plan[i + 1] == new_val:
+                continue
+
+        if pick < 0 or (up and s < plan[pick]) or (not up and s > plan[pick]):
+            pick = i
+    return pick
+
+
+def _dedupe_adjacent(plan):
+    """Nudge any segment left tied to its predecessor so every boundary in the
+    final plan is a real speed change, however it was produced.
+
+    Walking left to right, each fix only has to differ from the segment
+    before it (already resolved by the previous iteration), so this always
+    succeeds as long as the speed band has at least two grid points -
+    otherwise (e.g. MIN/MAX_SPEED_KPH too close together) the tie is left in
+    place rather than pushing a speed out of range.
+    """
+    lo, hi = settings.MIN_SPEED_KPH, settings.MAX_SPEED_KPH
+    step = settings.SPEED_STEP_KPH
+    if step <= 0:
+        return plan
+
+    for i in range(1, len(plan)):
+        if plan[i] != plan[i - 1]:
+            continue
+        options = []
+        for delta in (step, -step):
+            cand = round(plan[i] + delta, 1)
+            if lo <= cand <= hi and cand != plan[i - 1]:
+                options.append(cand)
+        if not options:
+            continue                    # no room to break the tie - leave it
+        next_val = plan[i + 1] if i + 1 < len(plan) else None
+        plan[i] = next((o for o in options if o != next_val), options[0])
 
     return plan
 
