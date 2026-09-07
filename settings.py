@@ -11,6 +11,13 @@
 APP_NAME = "Treadmill Buddy"
 APP_AUTHOR = "Peter Bridger"
 
+# SemVer (https://semver.org): MAJOR.MINOR.PATCH. Bump PATCH for a bug fix,
+# MINOR for a backwards-compatible feature, MAJOR for a breaking change - one
+# bump per commit that changes behaviour (docs/comment-only commits don't
+# need one). Tag the commit that changes this with a matching `vX.Y.Z` git
+# tag.
+APP_VERSION = "1.1.0"
+
 # --- Session plan ------------------------------------------------------------
 SESSION_DURATION_MIN = 60        # default length of a session, minutes
 SPEED_CHANGE_INTERVAL_MIN = 5 # speed is re-evaluated every this many minutes

@@ -220,6 +220,9 @@ class UI:
         auth_y = 175 if self.big else 90
         self.g_splash.append(self._label("by " + settings.APP_AUTHOR, self.s_author,
                                          GREY, self.W // 2, auth_y, (0.5, 0.5)))
+        ver_y = auth_y + (16 if self.big else 10)
+        self.g_splash.append(self._label("v" + settings.APP_VERSION, self.s_hint,
+                                         GREY, self.W // 2, ver_y, (0.5, 0.5)))
         self.root.append(self.g_splash)
 
     def _build_content(self):
