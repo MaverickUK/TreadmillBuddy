@@ -24,6 +24,7 @@
 import time
 import array
 import board
+import digitalio
 import pulseio
 
 import settings
@@ -38,6 +39,14 @@ class TreadmillController:
     def __init__(self):
         self._tx_pin = _pin(settings.PIN_RF_TX)
 
+        # Idle the DATA pin driven low between bursts. pulseio.PulseOut only
+        # owns the pin while a burst is in flight; deinit() otherwise leaves it
+        # floating, and a floating input can pick up ambient noise that keys
+        # the STX882 at random - which the treadmill's receiver sees as
+        # constant interference even though we're not actually transmitting.
+        self._idle = digitalio.DigitalInOut(self._tx_pin)
+        self._idle.switch_to_output(value=False)
+
         self.current_speed = 0.0     # our best guess at the belt speed (km/h)
         self.running = False
 
@@ -49,11 +58,14 @@ class TreadmillController:
             seq.append(LEAD_SYNC[-1])    # must end on an OFF gap
         burst = array.array("H", seq)
 
+        self._idle.deinit()           # release the pin so PulseOut can drive it
         tx = pulseio.PulseOut(self._tx_pin, frequency=100_000, duty_cycle=65535)
         try:
             tx.send(burst)                # blocks until the whole burst is out
         finally:
             tx.deinit()
+        self._idle = digitalio.DigitalInOut(self._tx_pin)
+        self._idle.switch_to_output(value=False)   # back to idle-low
 
     def _press(self, timings, times=1):
         """Transmit a button's code `times` times, like tapping it repeatedly."""
